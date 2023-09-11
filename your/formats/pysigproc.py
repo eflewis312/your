@@ -302,9 +302,16 @@ class SigprocFile(object):
         b0 = self.hdrbytes + bstart + (offset * self.bytes_per_spectrum)
         b1 = b0 + nbytes
 
-        data = numpy.frombuffer(
-            self._mmdata[int(b0) : int(b1)], dtype=self.dtype
-        ).reshape((-1, self.nifs, self.nchans))
+        #if less than 8 bits, convert to 8-bit
+        if self.nbits < 8:
+            data = self.unpack(nstart, nsamp).reshape((-1,self.nifs,self.nchans))
+            ###set self.nbits = 8 after unpacking? or is this still an attribute of the raw data?
+            ###doesn't seem like header will be affected. but there's a memory map with the original data structure
+        else:        
+            data = numpy.frombuffer(
+                self._mmdata[int(b0) : int(b1)], dtype=self.dtype
+            ).reshape((-1, self.nifs, self.nchans))
+            #first call of self.dtype in this function; fails if <8 bits.        
 
         if self.nifs == 1:
             return data
@@ -321,7 +328,8 @@ class SigprocFile(object):
 
     def unpack(self, nstart, nsamp):
         """
-        Unpack nsamp time slices starting at nstart to 32-bit floats.
+        Unpack nsamp time slices starting at nstart. 
+        Converts 8+ bit data to 32-bit floats, and <8 bit data to 8-bit ints.
 
         Args:
             nstart (int): Starting spectra number to start reading from.
@@ -332,6 +340,7 @@ class SigprocFile(object):
         """
         if self.nbits >= 8:
             return self.get_data(nstart, nsamp).astype(numpy.float32)
+            
         bstart = int(nstart) * self.bytes_per_spectrum
         nbytes = int(nsamp) * self.bytes_per_spectrum
         b0 = self.hdrbytes + bstart
@@ -341,7 +350,8 @@ class SigprocFile(object):
         d = numpy.frombuffer(self._mmdata[b0:b1], dtype=numpy.uint8).reshape(
             (nsamp, self.nifs, self.nchans / fac)
         )
-        unpacked = numpy.empty((nsamp, self.nifs, self.nchans), dtype=numpy.float32)
+        ###right now, assume we want output as 8-bit (not 32-bit)
+        unpacked = numpy.empty((nsamp, self.nifs, self.nchans), dtype=numpy.uint8)
         for i in range(fac):
             mask = 2 ** (self.nbits * i) * (2**self.nbits - 1)
             unpacked[..., i::fac] = (d & mask) / 2 ** (i * self.nbits)
